@@ -1,0 +1,12 @@
+numpy>=1.24
+scipy>=1.10
+pytest>=7.4
+flask>=3.0
+
+# Wejscie/wyjscie sprzetowe (mikrofon/glosnik, kamera) - wymagane dla
+# src/io_live/*.py i pelnej funkcjonalnosci www/ + src/api/server.py.
+sounddevice>=0.4
+opencv-python>=4.8
+
+# Opcjonalne: formalna analiza mocy testu w tests/stats/stats_utils.py.
+# statsmodels>=0.14
