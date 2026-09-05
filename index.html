@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TIMDR-Sygnalizacja</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #2a2e38; --text: #e6e8ee;
+    --muted: #9198a9; --accent: #5eb0ef; --good: #4caf7d; --bad: #e0616b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif; padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+  input[type=text], input[type=number] {
+    width: 100%; padding: 7px 8px; background: #0d0f14; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    margin-top: 10px; padding: 8px 12px; border: none; border-radius: 6px;
+    background: var(--accent); color: #08131c; font-weight: 600; font-size: 13px;
+    cursor: pointer; width: 100%;
+  }
+  button:hover { opacity: 0.9; }
+  button.secondary { background: #2a2e38; color: var(--text); }
+  #flashbox {
+    margin-top: 12px; height: 80px; border-radius: 6px; background: #000;
+    border: 1px solid var(--border);
+  }
+  #results {
+    grid-column: 1 / -1; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; min-height: 60px;
+  }
+  #results h2 { font-size: 15px; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .status { font-size: 12px; margin-top: 8px; color: var(--muted); }
+  .status.error { color: var(--bad); }
+  .status.ok { color: var(--good); }
+</style>
+</head>
+<body>
+
+<h1>TIMDR-Sygnalizacja</h1>
+<p class="sub">Panel testowy: Morse dzwiekowy (mikrofon/glosnik) i sygnal swietlny (kamera/ekran). Wymaga uruchomienia lokalnego serwera (run.bat) z dostepem do sprzetu.</p>
+
+<div class="grid">
+
+  <div class="panel">
+    <h2>Audio (Morse dzwiekowy)</h2>
+    <label for="audio-text">Tekst</label>
+    <input type="text" id="audio-text" value="SOS">
+    <div class="row">
+      <div>
+        <label for="audio-wpm">WPM</label>
+        <input type="number" id="audio-wpm" value="15">
+      </div>
+      <div>
+        <label for="audio-freq">Ton (Hz)</label>
+        <input type="number" id="audio-freq" value="600">
+      </div>
+    </div>
+    <button onclick="playAudio()">Odtworz przez glosnik</button>
+
+    <label for="audio-duration">Czas nagrania (s)</label>
+    <input type="number" id="audio-duration" value="5">
+    <button class="secondary" onclick="recordAudio()">Nagraj z mikrofonu</button>
+    <div class="status" id="audio-status"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Sygnal swietlny</h2>
+    <label for="light-text">Tekst (do wyslania miganiem ekranu)</label>
+    <input type="text" id="light-text" value="SOS">
+    <label for="light-wpm">WPM</label>
+    <input type="number" id="light-wpm" value="15">
+    <button onclick="flashLight()">Migaj ekranem (nadaj)</button>
+    <div id="flashbox"></div>
+
+    <label for="light-duration">Czas przechwytywania z kamery (s)</label>
+    <input type="number" id="light-duration" value="5">
+    <button class="secondary" onclick="captureLight()">Przechwyc z kamery</button>
+    <div class="status" id="light-status"></div>
+  </div>
+
+  <div id="results">
+    <h2>Wyniki dekodowania</h2>
+    <div id="results-body">
+      <span class="status">Brak wynikow - uzyj "Nagraj z mikrofonu" lub "Przechwyc z kamery".</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function setStatus(elId, msg, kind) {
+  const el = document.getElementById(elId);
+  el.textContent = msg;
+  el.className = "status" + (kind ? " " + kind : "");
+}
+
+function renderResults(data) {
+  const body = document.getElementById("results-body");
+  if (!data || !data.signals) {
+    body.innerHTML = '<span class="status error">Brak odczytu (pusty sygnal lub blad dekodowania).</span>';
+    return;
+  }
+  const s = data.signals;
+  const rows = [
+    ["Zdekodowany tekst", data.text || "(brak)"],
+    ["Szacowane WPM", data.estimated_wpm ?? "-"],
+    ["Liczba elementow", data.n_elements ?? "-"],
+    ["Anomalia (score)", s.anomalia ? s.anomalia.score.toFixed(3) : "-"],
+    ["Defekt (score, udzial)", s.defekt ? s.defekt.score.toFixed(3) : "-"],
+    ["Rezonans (score)", s.rezonans ? s.rezonans.score.toFixed(3) : "-"],
+    ["Skret (drift_rate)", s.skret && s.skret.drift_rate != null ? s.skret.drift_rate.toExponential(3) : "-"],
+  ];
+  body.innerHTML =
+    "<table>" +
+    rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("") +
+    "</table>";
+}
+
+async function playAudio() {
+  setStatus("audio-status", "Odtwarzanie...", "");
+  try {
+    const data = await postJSON("/api/audio/play", {
+      text: document.getElementById("audio-text").value,
+      wpm: Number(document.getElementById("audio-wpm").value),
+      tone_freq_hz: Number(document.getElementById("audio-freq").value),
+    });
+    setStatus("audio-status", `Odtworzono "${data.text}" (${data.duration_s}s).`, "ok");
+  } catch (e) {
+    setStatus("audio-status", "Blad: " + e.message, "error");
+  }
+}
+
+async function recordAudio() {
+  setStatus("audio-status", "Nagrywanie...", "");
+  try {
+    const data = await postJSON("/api/audio/record", {
+      duration_s: Number(document.getElementById("audio-duration").value),
+    });
+    setStatus("audio-status", "Gotowe.", "ok");
+    renderResults(data);
+  } catch (e) {
+    setStatus("audio-status", "Blad: " + e.message, "error");
+  }
+}
+
+async function flashLight() {
+  try {
+    const data = await postJSON("/api/light/segments", {
+      text: document.getElementById("light-text").value,
+      wpm: Number(document.getElementById("light-wpm").value),
+    });
+    const box = document.getElementById("flashbox");
+    for (const seg of data.segments) {
+      box.style.background = seg.is_on ? "#fff" : "#000";
+      await sleep(Math.max(1, seg.duration_s * 1000));
+    }
+    box.style.background = "#000";
+  } catch (e) {
+    setStatus("light-status", "Blad: " + e.message, "error");
+  }
+}
+
+async function captureLight() {
+  setStatus("light-status", "Przechwytywanie z kamery...", "");
+  try {
+    const data = await postJSON("/api/light/capture", {
+      duration_s: Number(document.getElementById("light-duration").value),
+    });
+    setStatus("light-status", "Gotowe.", "ok");
+    renderResults(data);
+  } catch (e) {
+    setStatus("light-status", "Blad: " + e.message, "error");
+  }
+}
+</script>
+
+</body>
+</html>
