@@ -17,19 +17,19 @@ import numpy as np
 @dataclass
 class RezonansResult:
     score: float  # w [0, 1], 1 = idealnie stabilny rytm
-    coefficient_of_variation: float
+    coefficient_of_variation: float | None
     mean_period_s: float | None = None
 
 
 def detect(values: list[float]) -> RezonansResult:
     """Ocena stabilnosci rytmu na podstawie listy okresow/dlugosci."""
     if len(values) < 2:
-        return RezonansResult(score=0.0, coefficient_of_variation=float("nan"))
+        return RezonansResult(score=0.0, coefficient_of_variation=None)
 
     arr = np.asarray(values, dtype=float)
     mean = arr.mean()
     if mean <= 1e-9:
-        return RezonansResult(score=0.0, coefficient_of_variation=float("nan"))
+        return RezonansResult(score=0.0, coefficient_of_variation=None)
 
     cv = float(arr.std() / mean)
     score = max(0.0, 1.0 - cv)
